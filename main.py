@@ -2,7 +2,7 @@ import numpy as np
 import cv2
 from mss.linux import MSS as mss
 from PIL import Image
-import time
+import time, pyautogui
 
 monitor = {"top": 250, "left": 10, "width": 1280, "height": 320}
 
@@ -21,7 +21,7 @@ def grab_and_thresh(monitor: dict):
 
     mean_pix_val = np.mean(img)
     # Take care of day and night transitions
-    if mean_pix_val < 127:
+    if mean_pix_val < 150:
         _, thresh = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
     else:
         _, thresh = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY_INV)
@@ -58,11 +58,11 @@ def get_contour_boxes(frame):
         cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
 
     # Sort Bounding Boxes by Area
-    sorted_boxes = sorted(
+    area_sorted_boxes = sorted(
         objects, key=lambda box: (box[2] - box[0]) * (box[3] - box[1]), reverse=True
     )
 
-    return frame, sorted_boxes
+    return frame, area_sorted_boxes
 
 
 def calc_fps(start_time, frame=None, print_on_console=False):
@@ -81,12 +81,34 @@ def calc_fps(start_time, frame=None, print_on_console=False):
         return frame
 
 
+def get_dino(frame, area_sorted_boxes):
+    height, width = frame.shape[:2]
+    edge_thresh = width * 0.1
+
+    left_boxes = filter(
+        lambda box: box[2] < edge_thresh and box[0] < edge_thresh, area_sorted_boxes
+    )
+
+    for box in left_boxes:
+        x1, y1, x2, y2 = box
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+
+    return frame, left_boxes
+
+
+counter = 0
 while True:
     start_time = time.time()
     thresh_frame = grab_and_thresh(monitor)
     cleaned_frame = remove_clutter(thresh_frame, kernel_size=5)
-    contour_frame, boxes = get_contour_boxes(cleaned_frame)
-    fps_frame = calc_fps(start_time, contour_frame)
+    contour_frame, area_sorted_boxes = get_contour_boxes(cleaned_frame)
+    dino_frame, left_boxes = get_dino(contour_frame, area_sorted_boxes)
+
+    counter += 1
+    if counter % 500 == 0:
+        pyautogui.press("up")
+
+    fps_frame = calc_fps(start_time, dino_frame)
 
     cv2.imshow("TheGame", fps_frame)
     if cv2.waitKey(1) & 0xFF == ord("q"):
