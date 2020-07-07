@@ -1,5 +1,5 @@
 import numpy as np
-import cv2
+import cv2, math
 from mss.linux import MSS as mss
 from PIL import Image
 import time, pyautogui
@@ -9,22 +9,26 @@ monitor = {"top": 250, "left": 10, "width": 1280, "height": 320}
 sct = mss()
 
 
-def grab_and_thresh(monitor: dict):
+def grab_frame(monitor: dict):
     # Get the screen capture
-    image = sct.grab(monitor)
+    frame = sct.grab(monitor)
 
     # Convert to Numpy Array
-    img = np.array(image, np.uint8)
+    frame = np.array(frame, np.uint8)
 
     # Convert to Grayscale
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
-    mean_pix_val = np.mean(img)
+    return frame
+
+
+def binary_threshold(frame: np.ndarray):
+    mean_pix_val = np.mean(frame)
     # Take care of day and night transitions
     if mean_pix_val < 150:
-        _, thresh = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+        _, thresh = cv2.threshold(frame, 127, 255, cv2.THRESH_BINARY)
     else:
-        _, thresh = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY_INV)
+        _, thresh = cv2.threshold(frame, 127, 255, cv2.THRESH_BINARY_INV)
 
     return thresh
 
@@ -99,10 +103,49 @@ def get_dino(frame, area_sorted_boxes):
     return frame, dino_box
 
 
+def detect_edges(frame: np.ndarray):
+    edges = cv2.Canny(frame, 100, 200)
+    return edges
+
+
+def polar2cartesian(polar_lines):
+    if polar_lines is None:
+        return None
+
+    cartesian_lines = list()
+
+    for line in polar_lines:
+        line = np.squeeze(line)
+        rho, theta = line
+        a = math.cos(theta)
+        b = math.sin(theta)
+        x0 = a * rho
+        y0 = b * rho
+        pt1 = (int(x0 + 1000 * (-b)), int(y0 + 1000 * (a)))
+        pt2 = (int(x0 - 1000 * (-b)), int(y0 - 1000 * (a)))
+        cartesian_lines.append([pt1, pt2])
+    return cartesian_lines
+
+
+def get_land(frame: np.ndarray):
+    lines = cv2.HoughLines(frame, 1, np.pi / 180, 150, None, 0, 0)
+    lines = polar2cartesian(lines)
+
+    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    for line in lines:
+        frame = cv2.line(frame, line[0], line[1], (0, 0, 255), 3, cv2.LINE_AA)
+
+    cv2.imshow("Land", frame)
+    return frame, lines
+
+
 counter = 0
 while True:
     start_time = time.time()
-    thresh_frame = grab_and_thresh(monitor)
+    gray_frame = grab_frame(monitor)
+    edge_frame = detect_edges(gray_frame)
+    get_land(edge_frame)
+    thresh_frame = binary_threshold(gray_frame)
     cleaned_frame = remove_clutter(thresh_frame, kernel_size=5)
     contour_frame, area_sorted_boxes = get_contour_boxes(cleaned_frame)
     dino_frame, left_boxes = get_dino(contour_frame, area_sorted_boxes)
