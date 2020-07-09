@@ -128,15 +128,38 @@ def polar2cartesian(polar_lines):
 
 
 def get_land(frame: np.ndarray):
-    lines = cv2.HoughLines(frame, 1, np.pi / 180, 150, None, 0, 0)
-    lines = polar2cartesian(lines)
 
+    # Some kinda-constants
+    frame_width = frame.shape[1]
+    minLineLength = frame_width // 2
+    maxLineGap = frame_width // 20
+
+    # Get the HoughLines
+    lines = cv2.HoughLinesP(
+        image=frame,
+        rho=1,
+        theta=np.pi / 180,
+        threshold=50,
+        lines=np.array([]),
+        minLineLength=minLineLength,
+        maxLineGap=maxLineGap,
+    )
+
+    # Convert to BGR
     frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-    for line in lines:
-        frame = cv2.line(frame, line[0], line[1], (0, 0, 255), 3, cv2.LINE_AA)
 
-    cv2.imshow("Land", frame)
-    return frame, lines
+    # Ignore if lines are not found
+    if lines is None:
+        return frame, []
+
+    # iterate over the lines, clean them and return
+    clean_lines = list()
+    for line in lines:
+        x1, y1, x2, y2 = np.squeeze(line)
+        clean_lines.append([x1, y1, x2, y2])
+        frame = cv2.line(frame, (x1, y1), (x2, y2), (0, 0, 255), 3, cv2.LINE_AA)
+
+    return frame, clean_lines
 
 
 counter = 0
