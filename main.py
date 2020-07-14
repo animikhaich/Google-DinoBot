@@ -118,8 +118,6 @@ def polar2cartesian(polar_lines):
         line = np.squeeze(line)
         rho, theta = line
         a = math.cos(theta)
-        b = math.sin(theta)
-        x0 = a * rho
         y0 = b * rho
         pt1 = (int(x0 + 1000 * (-b)), int(y0 + 1000 * (a)))
         pt2 = (int(x0 - 1000 * (-b)), int(y0 - 1000 * (a)))
@@ -145,41 +143,76 @@ def get_land(frame: np.ndarray):
         maxLineGap=maxLineGap,
     )
 
-    # Convert to BGR
-    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-
     # Ignore if lines are not found
     if lines is None:
-        return frame, []
+        return []
 
     # iterate over the lines, clean them and return
-    clean_lines = list()
+    clean_lines = [np.squeeze(line) for line in lines]
+
+    sorted_lines = sorted(
+        clean_lines,
+        key=lambda line: np.linalg.norm(
+            np.array(line[0], line[1]) - np.array(line[2], line[3])
+        ),
+        reverse=True,
+    )
+
+    return sorted_lines[0]
+
+
+def draw_lines(frame: np.ndarray, lines: list):
     for line in lines:
-        x1, y1, x2, y2 = np.squeeze(line)
-        clean_lines.append([x1, y1, x2, y2])
+        if len(line) == 0:
+            continue
+
+        x1, y1, x2, y2 = line
         frame = cv2.line(frame, (x1, y1), (x2, y2), (0, 0, 255), 3, cv2.LINE_AA)
 
-    return frame, clean_lines
+    return frame
 
 
-counter = 0
+def calc_perp_dist(line, point):
+    p1 = np.array([line[0], line[1]])
+    p2 = np.array([line[2], line[3]])
+    p3 = np.array(point)
+
+    dist = np.linalg.norm(np.cross(p2 - p1, p1 - p3)) / np.linalg.norm(p2 - p1)
+
+    return dist
+
+
+def get_bottom_center_point(bbox):
+    if bbox is None:
+        return None
+
+    x1, y1, x2, y2 = bbox
+    cx = x1 + (x2 - x1) // 2
+
+    return (cx, y2)
+
+
 while True:
     start_time = time.time()
     gray_frame = grab_frame(monitor)
     edge_frame = detect_edges(gray_frame)
-    get_land(edge_frame)
+    line = get_land(edge_frame)
+
     thresh_frame = binary_threshold(gray_frame)
     cleaned_frame = remove_clutter(thresh_frame, kernel_size=5)
     contour_frame, area_sorted_boxes = get_contour_boxes(cleaned_frame)
-    dino_frame, left_boxes = get_dino(contour_frame, area_sorted_boxes)
+    dino_frame, dino_box = get_dino(contour_frame, area_sorted_boxes)
 
-    # counter += 1
-    # if counter % 500 == 0:
-    #     pyautogui.press("up")
+    dino_point = get_bottom_center_point(dino_box)
 
-    fps_frame = calc_fps(start_time, dino_frame)
+    dist = calc_perp_dist(line, dino_point)
+    # print(dist)
+
+    display_frame = draw_lines(dino_frame, [line])
+    fps_frame = calc_fps(start_time, display_frame)
 
     cv2.imshow("TheGame", fps_frame)
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        cv2.destroyAllWindows()
+    if cv2.waitKey(1) == ord("q"):
         break
+
+cv2.destroyAllWindows()
